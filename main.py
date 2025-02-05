@@ -1,33 +1,50 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
-from indexer import create_index
 import os
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from indexer import fetch_and_index_docs
+from chatbot import chat_with_ai
 
 load_dotenv()
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+
 app = FastAPI()
 
-# Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all domains (change this in production)
     allow_credentials=True,
-    allow_methods=["*"]
+    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers
 )
 
-# Load model & index
-model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-index = create_index()
+@app.get("/")
+def home():
+    return {"message": "AI Doc Search is running!"}
 
-def embed_text(text):
-    return model.encode(text).tolist()
+@app.post("/index")
+async def index_url(request: Request):
+    """Fetch and index a document from a given URL."""
+    data = await request.json()
+    url = data.get("url")
 
-@app.get("/search")
-def search(query: str):
-    response = index.as_query_engine().query(query)
-    return {"answer": response.response}
+    if not url:
+        return {"error": "URL is required."}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        fetch_and_index_docs(url)  # Scrape and index the document
+    except Exception as e:
+        return {"error": str(e)}
+
+    return {"message": "Docs indexed successfully! You can now ask the chatbot."}
+
+@app.post("/chat")
+async def chat(request: Request):
+    data = await request.json()
+    query = data.get("query")
+
+    if not query:
+        return {"error": "Query is required."}
+
+    response = chat_with_ai(query)  # Uses LlamaIndex + Mistral-7B
+    return {"response": response}
